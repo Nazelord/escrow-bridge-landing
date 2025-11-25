@@ -80,20 +80,7 @@ export function SettlementWizard() {
       
       const idHash = keccak256(encodePacked(["bytes32", "string"], [salt, settlementId]));
 
-      // Store Salt
-      setStatus("Registering settlement...");
-      await fetch(`${CHAINSETTLE_API}/api/store_salt`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id_hash: idHash,
-          salt,
-          email: data.email,
-          recipient_email: recipientEmail,
-        }),
-      });
-
-      // Init Payment with native BDAG (no approval needed)
+      // Init Payment with native BDAG FIRST (most important - the on-chain transaction)
       setStatus("Confirm transaction in wallet...");
       writeContract({
         address: BRIDGE_ADDRESS as `0x${string}`,
@@ -103,6 +90,25 @@ export function SettlementWizard() {
         value: rawAmount, // Send BDAG as value since it's native token
         chainId: blockdag.id,
       });
+
+      // Store Salt in API (optional - if this fails, on-chain tx is still done)
+      // We do this after to not block the transaction
+      try {
+        await fetch(`${CHAINSETTLE_API}/api/store_salt`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id_hash: idHash,
+            salt,
+            email: data.email,
+            recipient_email: recipientEmail,
+          }),
+        });
+        console.log("Salt stored successfully in API");
+      } catch (apiError) {
+        console.warn("API storage failed, but on-chain transaction was submitted:", apiError);
+        // Don't throw - the important part (on-chain tx) is already done
+      }
 
     } catch (err) {
       const error = err as Error;
