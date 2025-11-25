@@ -5,26 +5,21 @@ import { Button } from "@/components/ui/button";
 import { Plus, Send } from "lucide-react";
 import { useConnection, useReadContract } from "wagmi";
 import { formatUnits } from "viem";
-import { BRIDGE_ADDRESS, ERC20_ABI, ESCROW_BRIDGE_ABI } from "@/lib/constants";
+import { baseSepolia } from "wagmi/chains";
+import { USDC_ADDRESS, ERC20_ABI } from "@/lib/constants";
 
 export function BalanceCard() {
   const { address } = useConnection();
 
-  // 1. Get USDC Token Address from Bridge
-  const { data: usdcTokenAddress } = useReadContract({
-    address: BRIDGE_ADDRESS as `0x${string}`,
-    abi: ESCROW_BRIDGE_ABI,
-    functionName: 'usdcToken',
-  });
-
-  // 2. Get USDC Balance
+  // Get USDC Balance directly from USDC token on Base Sepolia
   const { data: balanceRaw } = useReadContract({
-    address: usdcTokenAddress as `0x${string}`,
+    address: USDC_ADDRESS as `0x${string}`,
     abi: ERC20_ABI,
     functionName: 'balanceOf',
     args: address ? [address as `0x${string}`] : undefined,
+    chainId: baseSepolia.id,
     query: {
-      enabled: !!address && !!usdcTokenAddress,
+      enabled: !!address,
     }
   });
 

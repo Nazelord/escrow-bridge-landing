@@ -5,4 +5,7 @@ export const BRIDGE_ADDRESS = process.env.NEXT_PUBLIC_BRIDGE_ADDRESS || "0x0460f
 export const CHAINSETTLE_API = process.env.NEXT_PUBLIC_CHAINSETTLE_API || "https://api.chainsettle.tech/";
 export const ESCROW_BRIDGE_API = process.env.NEXT_PUBLIC_ESCROW_BRIDGE_API || "https://app.escrowbridge.xyz/";
 
+// USDC on Base Sepolia
+export const USDC_ADDRESS = process.env.NEXT_PUBLIC_USDC_ADDRESS || "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
+
 export { ERC20_ABI, ESCROW_BRIDGE_ABI };

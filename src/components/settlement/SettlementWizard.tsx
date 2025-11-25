@@ -4,9 +4,10 @@ import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardContent } from "@/components/ui/card";
 import { Check } from "lucide-react";
-import { useConnection, useWriteContract, useWaitForTransactionReceipt, useReadContract } from "wagmi";
+import { useConnection, useWriteContract, useWaitForTransactionReceipt, useReadContract, useSwitchChain } from "wagmi";
 import { parseUnits, keccak256, encodePacked, toHex } from "viem";
-import { BRIDGE_ADDRESS, CHAINSETTLE_API, ESCROW_BRIDGE_API, ESCROW_BRIDGE_ABI } from "@/lib/constants";
+import { baseSepolia } from "wagmi/chains";
+import { BRIDGE_ADDRESS, CHAINSETTLE_API, ESCROW_BRIDGE_API, ESCROW_BRIDGE_ABI, USDC_ADDRESS, ERC20_ABI } from "@/lib/constants";
 
 // Steps
 import { StepAmount } from "./StepAmount";
@@ -15,15 +16,17 @@ import { StepReview } from "./StepReview";
 import { StepProcessing } from "./StepProcessing";
 
 export function SettlementWizard() {
-  const { address } = useConnection();
+  const { address, chainId } = useConnection();
+  const { switchChain } = useSwitchChain();
   const [step, setStep] = useState(1);
   const [data, setData] = useState({
     amount: "",
     email: "",
   });
   const [status, setStatus] = useState<string | null>(null);
+  const [needsApproval, setNeedsApproval] = useState(false);
   
-  const { writeContract, data: hash, error: writeError } = useWriteContract();
+  const { writeContract, data: hash, error: writeError, reset } = useWriteContract();
   const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({
     hash,
   });
@@ -34,24 +37,84 @@ export function SettlementWizard() {
     functionName: 'recipientEmail',
   });
 
+  const { data: allowance, refetch: refetchAllowance } = useReadContract({
+    address: USDC_ADDRESS as `0x${string}`,
+    abi: ERC20_ABI,
+    functionName: 'allowance',
+    args: [address, BRIDGE_ADDRESS],
+    chainId: baseSepolia.id,
+  });
+
+  const { data: usdcBalance } = useReadContract({
+    address: USDC_ADDRESS as `0x${string}`,
+    abi: ERC20_ABI,
+    functionName: 'balanceOf',
+    args: [address],
+    chainId: baseSepolia.id,
+  });
+
   const nextStep = () => setStep((s) => s + 1);
   const prevStep = () => setStep((s) => s - 1);
 
   const handleSettlement = async () => {
     if (!address) return;
+
+    // Check if we're on Base Sepolia
+    if (chainId !== baseSepolia.id) {
+      setStatus("Switching to Base Sepolia...");
+      try {
+        await switchChain({ chainId: baseSepolia.id });
+      } catch (err) {
+        const error = err as Error;
+        setStatus(`Error switching network: ${error.message}`);
+        return;
+      }
+    }
+
     setStep(4); // Go to processing step
     setStatus("Preparing transaction...");
 
     try {
       const decimals = 6;
       const rawAmount = parseUnits(data.amount, decimals);
+
+      // Check if we need to approve USDC spending
+      const currentAllowance = (allowance as bigint) || BigInt(0);
+      if (currentAllowance < rawAmount) {
+        setNeedsApproval(true);
+        setStatus("Approving USDC spending...");
+        
+        writeContract({
+          address: USDC_ADDRESS as `0x${string}`,
+          abi: ERC20_ABI,
+          functionName: 'approve',
+          args: [BRIDGE_ADDRESS, rawAmount],
+          chainId: baseSepolia.id,
+        });
+        return; // Wait for approval to complete
+      }
+
+      // If we have enough allowance, proceed with payment
+      await initiatePayment(rawAmount);
+
+    } catch (err) {
+      const error = err as Error;
+      console.error(error);
+      setStatus(`Error: ${error.message}`);
+    }
+  };
+
+  const initiatePayment = async (rawAmount: bigint) => {
+    if (!address) return;
+
+    try {
       const salt = toHex(crypto.getRandomValues(new Uint8Array(32)));
       const settlementId = `${address}-${Date.now()}`;
       
       const idHash = keccak256(encodePacked(["bytes32", "string"], [salt, settlementId]));
       const userEmailHash = keccak256(encodePacked(["bytes32", "string"], [salt, data.email]));
 
-      // 3. Store Salt
+      // Store Salt
       setStatus("Registering settlement...");
       await fetch(`${CHAINSETTLE_API}/api/store_salt`, {
         method: "POST",
@@ -64,34 +127,52 @@ export function SettlementWizard() {
         }),
       });
 
-      // 4. Init Payment
+      // Init Payment
       setStatus("Confirm transaction in wallet...");
+      setNeedsApproval(false);
       writeContract({
         address: BRIDGE_ADDRESS as `0x${string}`,
         abi: ESCROW_BRIDGE_ABI,
         functionName: 'initPayment',
         args: [idHash, userEmailHash, rawAmount],
+        chainId: baseSepolia.id,
       });
 
-    } catch (err: any) {
-      console.error(err);
-      setStatus(`Error: ${err.message}`);
+    } catch (err) {
+      const error = err as Error;
+      console.error(error);
+      setStatus(`Error: ${error.message}`);
     }
   };
 
   useEffect(() => {
-    if (isConfirming) {
-        setStatus("Transaction submitted. Waiting for confirmation...");
+    if (isConfirming && !status?.includes("Waiting for confirmation")) {
+        setStatus(needsApproval ? "Approving USDC..." : "Transaction submitted. Waiting for confirmation...");
     }
+  }, [isConfirming, needsApproval, status]);
+
+  useEffect(() => {
     if (isConfirmed) {
-        setStatus("Transaction confirmed! Waiting for settlement...");
-        // Poll logic would go here, simplified for now
-        setStatus("Settlement Completed!");
+        if (needsApproval) {
+          setStatus("USDC approved! Initiating payment...");
+          void refetchAllowance();
+          reset();
+          // Retry payment with approval done
+          const rawAmount = parseUnits(data.amount, 6);
+          setTimeout(() => void initiatePayment(rawAmount), 1000);
+        } else {
+          setStatus("Transaction confirmed! Waiting for settlement...");
+          // Poll logic would go here, simplified for now
+          setTimeout(() => setStatus("Settlement Completed!"), 2000);
+        }
     }
+  }, [isConfirmed]);
+
+  useEffect(() => {
     if (writeError) {
         setStatus(`Error: ${writeError.message}`);
     }
-  }, [isConfirming, isConfirmed, writeError]);
+  }, [writeError]);
 
   return (
     <div className="max-w-xl mx-auto">
