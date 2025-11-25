@@ -42,7 +42,7 @@ export function StepProcessing({ status, isProcessing }: StepProcessingProps) {
       </div>
 
       {!isProcessing && (
-        <Link href="/">
+        <Link href="/dashboard">
             <Button className="mt-4">Back to Dashboard</Button>
         </Link>
       )}
