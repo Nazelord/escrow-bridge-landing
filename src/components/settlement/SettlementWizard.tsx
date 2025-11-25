@@ -6,8 +6,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Check } from "lucide-react";
 import { useConnection, useWriteContract, useWaitForTransactionReceipt, useReadContract, useSwitchChain } from "wagmi";
 import { parseUnits, keccak256, encodePacked, toHex } from "viem";
-import { baseSepolia } from "wagmi/chains";
-import { BRIDGE_ADDRESS, CHAINSETTLE_API, ESCROW_BRIDGE_API, ESCROW_BRIDGE_ABI, USDC_ADDRESS, ERC20_ABI } from "@/lib/constants";
+import { blockdag } from "@/lib/config";
+import { BRIDGE_ADDRESS, CHAINSETTLE_API, ESCROW_BRIDGE_API, ESCROW_BRIDGE_ABI, BDAG_ADDRESS, ERC20_ABI } from "@/lib/constants";
 
 // Steps
 import { StepAmount } from "./StepAmount";
@@ -38,19 +38,19 @@ export function SettlementWizard() {
   });
 
   const { data: allowance, refetch: refetchAllowance } = useReadContract({
-    address: USDC_ADDRESS as `0x${string}`,
+    address: BDAG_ADDRESS as `0x${string}`,
     abi: ERC20_ABI,
     functionName: 'allowance',
     args: [address, BRIDGE_ADDRESS],
-    chainId: baseSepolia.id,
+    chainId: blockdag.id,
   });
 
-  const { data: usdcBalance } = useReadContract({
-    address: USDC_ADDRESS as `0x${string}`,
+  const { data: bdagBalance } = useReadContract({
+    address: BDAG_ADDRESS as `0x${string}`,
     abi: ERC20_ABI,
     functionName: 'balanceOf',
     args: [address],
-    chainId: baseSepolia.id,
+    chainId: blockdag.id,
   });
 
   const nextStep = () => setStep((s) => s + 1);
@@ -59,11 +59,11 @@ export function SettlementWizard() {
   const handleSettlement = async () => {
     if (!address) return;
 
-    // Check if we're on Base Sepolia
-    if (chainId !== baseSepolia.id) {
-      setStatus("Switching to Base Sepolia...");
+    // Check if we're on BlockDAG network
+    if (chainId !== blockdag.id) {
+      setStatus("Switching to BlockDAG Testnet...");
       try {
-        await switchChain({ chainId: baseSepolia.id });
+        await switchChain({ chainId: blockdag.id });
       } catch (err) {
         const error = err as Error;
         setStatus(`Error switching network: ${error.message}`);
@@ -75,21 +75,21 @@ export function SettlementWizard() {
     setStatus("Preparing transaction...");
 
     try {
-      const decimals = 6;
+      const decimals = 18; // BDAG has 18 decimals like ETH
       const rawAmount = parseUnits(data.amount, decimals);
 
-      // Check if we need to approve USDC spending
+      // Check if we need to approve BDAG spending
       const currentAllowance = (allowance as bigint) || BigInt(0);
       if (currentAllowance < rawAmount) {
         setNeedsApproval(true);
-        setStatus("Approving USDC spending...");
+        setStatus("Approving BDAG spending...");
         
         writeContract({
-          address: USDC_ADDRESS as `0x${string}`,
+          address: BDAG_ADDRESS as `0x${string}`,
           abi: ERC20_ABI,
           functionName: 'approve',
           args: [BRIDGE_ADDRESS, rawAmount],
-          chainId: baseSepolia.id,
+          chainId: blockdag.id,
         });
         return; // Wait for approval to complete
       }
@@ -134,8 +134,8 @@ export function SettlementWizard() {
         address: BRIDGE_ADDRESS as `0x${string}`,
         abi: ESCROW_BRIDGE_ABI,
         functionName: 'initPayment',
-        args: [idHash, userEmailHash, rawAmount],
-        chainId: baseSepolia.id,
+        args: [idHash, rawAmount],
+        chainId: blockdag.id,
       });
 
     } catch (err) {
@@ -147,18 +147,18 @@ export function SettlementWizard() {
 
   useEffect(() => {
     if (isConfirming && !status?.includes("Waiting for confirmation")) {
-        setStatus(needsApproval ? "Approving USDC..." : "Transaction submitted. Waiting for confirmation...");
+        setStatus(needsApproval ? "Approving BDAG..." : "Transaction submitted. Waiting for confirmation...");
     }
   }, [isConfirming, needsApproval, status]);
 
   useEffect(() => {
     if (isConfirmed) {
         if (needsApproval) {
-          setStatus("USDC approved! Initiating payment...");
+          setStatus("BDAG approved! Initiating payment...");
           void refetchAllowance();
           reset();
           // Retry payment with approval done
-          const rawAmount = parseUnits(data.amount, 6);
+          const rawAmount = parseUnits(data.amount, 18); // BDAG has 18 decimals
           setTimeout(() => void initiatePayment(rawAmount), 1000);
         } else {
           setStatus("Transaction confirmed! Waiting for settlement...");

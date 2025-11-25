@@ -26,7 +26,7 @@ export function StepReview({ data, onConfirm, onBack }: StepReviewProps) {
       <div className="bg-muted/50 p-6 rounded-xl space-y-4">
         <div className="flex justify-between items-center border-b pb-4">
           <span className="text-muted-foreground">Amount</span>
-          <span className="text-xl font-bold">{data.amount} USDC</span>
+          <span className="text-xl font-bold">{data.amount} BDAG</span>
         </div>
         <div className="flex justify-between items-center border-b pb-4">
           <span className="text-muted-foreground">Email</span>

@@ -23,15 +23,14 @@ export function StepAmount({ amount, setAmount, onNext }: StepAmountProps) {
     >
       <div className="text-center space-y-2">
         <h2 className="text-2xl font-bold">How much do you want to settle?</h2>
-        <p className="text-muted-foreground">Enter the amount in USDC.</p>
+        <p className="text-muted-foreground">Enter the amount in BDAG.</p>
       </div>
 
       <div className="relative">
-        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-2xl font-bold text-muted-foreground">$</span>
         <Input
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
-          className="pl-10 text-3xl h-20 font-bold"
+          className="text-3xl h-20 font-bold"
           placeholder="0.00"
           type="number"
           autoFocus
