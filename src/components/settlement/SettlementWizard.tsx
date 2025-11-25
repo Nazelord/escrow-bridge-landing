@@ -4,10 +4,10 @@ import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardContent } from "@/components/ui/card";
 import { Check } from "lucide-react";
-import { useConnection, useWriteContract, useWaitForTransactionReceipt, useReadContract, useSwitchChain } from "wagmi";
+import { useConnection, useWriteContract, useWaitForTransactionReceipt, useReadContract, useSwitchChain, useBalance } from "wagmi";
 import { parseUnits, keccak256, encodePacked, toHex, type Abi } from "viem";
 import { blockdag } from "@/lib/config";
-import { BRIDGE_ADDRESS, CHAINSETTLE_API, ESCROW_BRIDGE_API, ESCROW_BRIDGE_ABI, BDAG_ADDRESS, ERC20_ABI } from "@/lib/constants";
+import { BRIDGE_ADDRESS, CHAINSETTLE_API, ESCROW_BRIDGE_API, ESCROW_BRIDGE_ABI } from "@/lib/constants";
 
 // Steps
 import { StepAmount } from "./StepAmount";
@@ -24,9 +24,8 @@ export function SettlementWizard() {
     email: "",
   });
   const [status, setStatus] = useState<string | null>(null);
-  const [needsApproval, setNeedsApproval] = useState(false);
   
-  const { writeContract, data: hash, error: writeError, reset } = useWriteContract();
+  const { writeContract, data: hash, error: writeError } = useWriteContract();
   const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({
     hash,
   });
@@ -35,22 +34,6 @@ export function SettlementWizard() {
     address: BRIDGE_ADDRESS as `0x${string}`,
     abi: ESCROW_BRIDGE_ABI as unknown as Abi,
     functionName: 'recipientEmail',
-  });
-
-  const { data: allowance, refetch: refetchAllowance } = useReadContract({
-    address: BDAG_ADDRESS as `0x${string}`,
-    abi: ERC20_ABI as unknown as Abi,
-    functionName: 'allowance',
-    args: [address, BRIDGE_ADDRESS],
-    chainId: blockdag.id,
-  });
-
-  const { data: bdagBalance } = useReadContract({
-    address: BDAG_ADDRESS as `0x${string}`,
-    abi: ERC20_ABI as unknown as Abi,
-    functionName: 'balanceOf',
-    args: [address],
-    chainId: blockdag.id,
   });
 
   const nextStep = () => setStep((s) => s + 1);
@@ -78,23 +61,7 @@ export function SettlementWizard() {
       const decimals = 18; // BDAG has 18 decimals like ETH
       const rawAmount = parseUnits(data.amount, decimals);
 
-      // Check if we need to approve BDAG spending
-      const currentAllowance = (allowance as bigint) || BigInt(0);
-      if (currentAllowance < rawAmount) {
-        setNeedsApproval(true);
-        setStatus("Approving BDAG spending...");
-        
-        writeContract({
-          address: BDAG_ADDRESS as `0x${string}`,
-          abi: ERC20_ABI as unknown as Abi,
-          functionName: 'approve',
-          args: [BRIDGE_ADDRESS, rawAmount],
-          chainId: blockdag.id,
-        });
-        return; // Wait for approval to complete
-      }
-
-      // If we have enough allowance, proceed with payment
+      // BDAG is native token, no approval needed - proceed directly with payment
       await initiatePayment(rawAmount);
 
     } catch (err) {
@@ -112,7 +79,6 @@ export function SettlementWizard() {
       const settlementId = `${address}-${Date.now()}`;
       
       const idHash = keccak256(encodePacked(["bytes32", "string"], [salt, settlementId]));
-      const userEmailHash = keccak256(encodePacked(["bytes32", "string"], [salt, data.email]));
 
       // Store Salt
       setStatus("Registering settlement...");
@@ -127,14 +93,14 @@ export function SettlementWizard() {
         }),
       });
 
-      // Init Payment
+      // Init Payment with native BDAG (no approval needed)
       setStatus("Confirm transaction in wallet...");
-      setNeedsApproval(false);
       writeContract({
         address: BRIDGE_ADDRESS as `0x${string}`,
         abi: ESCROW_BRIDGE_ABI as unknown as Abi,
         functionName: 'initPayment',
         args: [idHash, rawAmount],
+        value: rawAmount, // Send BDAG as value since it's native token
         chainId: blockdag.id,
       });
 
@@ -147,24 +113,15 @@ export function SettlementWizard() {
 
   useEffect(() => {
     if (isConfirming && !status?.includes("Waiting for confirmation")) {
-        setStatus(needsApproval ? "Approving BDAG..." : "Transaction submitted. Waiting for confirmation...");
+        setStatus("Transaction submitted. Waiting for confirmation...");
     }
-  }, [isConfirming, needsApproval, status]);
+  }, [isConfirming, status]);
 
   useEffect(() => {
     if (isConfirmed) {
-        if (needsApproval) {
-          setStatus("BDAG approved! Initiating payment...");
-          void refetchAllowance();
-          reset();
-          // Retry payment with approval done
-          const rawAmount = parseUnits(data.amount, 18); // BDAG has 18 decimals
-          setTimeout(() => void initiatePayment(rawAmount), 1000);
-        } else {
-          setStatus("Transaction confirmed! Waiting for settlement...");
-          // Poll logic would go here, simplified for now
-          setTimeout(() => setStatus("Settlement Completed!"), 2000);
-        }
+      setStatus("Transaction confirmed! Waiting for settlement...");
+      // Poll logic would go here, simplified for now
+      setTimeout(() => setStatus("Settlement Completed!"), 2000);
     }
   }, [isConfirmed]);
 
