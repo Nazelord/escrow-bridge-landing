@@ -3,27 +3,23 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Plus, Send } from "lucide-react";
-import { useConnection, useReadContract } from "wagmi";
-import { formatUnits } from "viem";
+import { useConnection, useBalance } from "wagmi";
+import { formatEther } from "viem";
 import { blockdag } from "@/lib/config";
-import { BDAG_ADDRESS, ERC20_ABI } from "@/lib/constants";
 
 export function BalanceCard() {
   const { address } = useConnection();
 
-  // Get BDAG Balance from BlockDAG network
-  const { data: balanceRaw } = useReadContract({
-    address: BDAG_ADDRESS as `0x${string}`,
-    abi: ERC20_ABI,
-    functionName: 'balanceOf',
-    args: address ? [address as `0x${string}`] : undefined,
+  // Get BDAG Balance (native token) from BlockDAG network
+  const { data: balanceData } = useBalance({
+    address: address as `0x${string}`,
     chainId: blockdag.id,
     query: {
       enabled: !!address,
     }
   });
 
-  const balance = balanceRaw ? formatUnits(balanceRaw as bigint, 18) : null; // BDAG has 18 decimals
+  const balance = balanceData ? formatEther(balanceData.value) : null;
 
   return (
     <Card className="bg-gradient-to-br from-zinc-900 to-zinc-800 text-white border-none shadow-xl overflow-hidden relative">

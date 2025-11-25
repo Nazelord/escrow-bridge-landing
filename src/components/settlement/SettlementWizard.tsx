@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardContent } from "@/components/ui/card";
 import { Check } from "lucide-react";
-import { useConnection, useWriteContract, useWaitForTransactionReceipt, useReadContract, useSwitchChain, useBalance } from "wagmi";
+import { useConnection, useWriteContract, useWaitForTransactionReceipt, useReadContract, useSwitchChain } from "wagmi";
 import { parseUnits, keccak256, encodePacked, toHex, type Abi } from "viem";
 import { blockdag } from "@/lib/config";
 import { BRIDGE_ADDRESS, CHAINSETTLE_API, ESCROW_BRIDGE_API, ESCROW_BRIDGE_ABI } from "@/lib/constants";
@@ -82,6 +82,13 @@ export function SettlementWizard() {
 
       // Init Payment with native BDAG FIRST (most important - the on-chain transaction)
       setStatus("Confirm transaction in wallet...");
+      console.log('Initiating payment:', {
+        idHash,
+        rawAmount: rawAmount.toString(),
+        address: BRIDGE_ADDRESS,
+        chainId: blockdag.id
+      });
+      
       writeContract({
         address: BRIDGE_ADDRESS as `0x${string}`,
         abi: ESCROW_BRIDGE_ABI as unknown as Abi,
@@ -119,20 +126,23 @@ export function SettlementWizard() {
 
   useEffect(() => {
     if (isConfirming && !status?.includes("Waiting for confirmation")) {
+        console.log('Transaction confirming, hash:', hash);
         setStatus("Transaction submitted. Waiting for confirmation...");
     }
-  }, [isConfirming, status]);
+  }, [isConfirming, status, hash]);
 
   useEffect(() => {
     if (isConfirmed) {
+      console.log('Transaction confirmed! Hash:', hash);
       setStatus("Transaction confirmed! Waiting for settlement...");
       // Poll logic would go here, simplified for now
       setTimeout(() => setStatus("Settlement Completed!"), 2000);
     }
-  }, [isConfirmed]);
+  }, [isConfirmed, hash]);
 
   useEffect(() => {
     if (writeError) {
+        console.error('Transaction error:', writeError);
         setStatus(`Error: ${writeError.message}`);
     }
   }, [writeError]);
