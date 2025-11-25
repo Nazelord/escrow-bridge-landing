@@ -4,21 +4,44 @@ import {
   createStorage,
   http,
 } from "wagmi";
-import { mainnet, sepolia, base, baseSepolia } from "wagmi/chains";
+import { defineChain } from 'viem';
+
+export const blockdag = defineChain({
+  id: 1043,
+  name: 'BlockDAG Testnet',
+  network: 'blockdag',
+  nativeCurrency: {
+    name: 'BlockDAG',
+    symbol: 'BDAG',
+    decimals: 18,
+  },
+  rpcUrls: {
+    default: {
+      http: ['https://rpc.primordial.bdagscan.com'],
+    },
+    public: {
+      http: ['https://rpc.primordial.bdagscan.com'],
+    },
+  },
+  blockExplorers: {
+    default: {
+      name: 'Blockdag Explorer',
+      url: 'https://primordial.bdagscan.com',
+    },
+  },
+  testnet: true,
+});
 
 export function getConfig() {
   return createConfig({
-    chains: [mainnet, sepolia, base, baseSepolia],
+    chains: [blockdag],
     ssr: true,
     storage: createStorage({
       storage: cookieStorage,
     }),
     transports: {
-    [mainnet.id]: http(),
-    [sepolia.id]: http(),
-    [base.id]: http(),
-    [baseSepolia.id]: http(),
-  },
-  multiInjectedProviderDiscovery: true,
-});
+      [blockdag.id]: http(),
+    },
+    multiInjectedProviderDiscovery: true,
+  });
 }

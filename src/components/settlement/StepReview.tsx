@@ -8,9 +8,16 @@ interface StepReviewProps {
   data: { amount: string; email: string };
   onConfirm: () => void;
   onBack: () => void;
+  fee?: number;
+  freeBalance?: string;
+  recipientEmail?: string;
 }
 
-export function StepReview({ data, onConfirm, onBack }: StepReviewProps) {
+export function StepReview({ data, onConfirm, onBack, fee = 0, freeBalance, recipientEmail }: StepReviewProps) {
+  const feePercent = (fee * 100).toFixed(2);
+  const amountNum = parseFloat(data.amount);
+  const feeAmount = amountNum * fee;
+  const totalAmount = amountNum + feeAmount;
   return (
     <motion.div
       initial={{ opacity: 0, x: 20 }}
@@ -26,16 +33,34 @@ export function StepReview({ data, onConfirm, onBack }: StepReviewProps) {
       <div className="bg-muted/50 p-6 rounded-xl space-y-4">
         <div className="flex justify-between items-center border-b pb-4">
           <span className="text-muted-foreground">Amount</span>
-          <span className="text-xl font-bold">{data.amount} USDC</span>
+          <span className="text-xl font-bold">{data.amount} BDAG</span>
         </div>
         <div className="flex justify-between items-center border-b pb-4">
           <span className="text-muted-foreground">Email</span>
           <span className="font-medium">{data.email}</span>
         </div>
-        <div className="flex justify-between items-center">
+        {recipientEmail && (
+          <div className="flex justify-between items-center border-b pb-4">
+            <span className="text-muted-foreground">PayPal Recipient</span>
+            <span className="font-medium text-sm">{recipientEmail}</span>
+          </div>
+        )}
+        <div className="flex justify-between items-center border-b pb-4">
           <span className="text-muted-foreground">Fee</span>
-          <span className="font-medium text-green-600">Free</span>
+          <span className="font-medium">{feePercent}% {feeAmount > 0 && `(${feeAmount.toFixed(6)} BDAG)`}</span>
         </div>
+        {totalAmount > amountNum && (
+          <div className="flex justify-between items-center border-b pb-4">
+            <span className="text-muted-foreground font-semibold">Total</span>
+            <span className="text-xl font-bold">{totalAmount.toFixed(6)} BDAG</span>
+          </div>
+        )}
+        {freeBalance && (
+          <div className="flex justify-between items-center text-sm">
+            <span className="text-muted-foreground">Bridge Balance Available</span>
+            <span className="font-medium text-green-600">{parseFloat(freeBalance).toFixed(2)} BDAG</span>
+          </div>
+        )}
       </div>
 
       <div className="flex gap-4">

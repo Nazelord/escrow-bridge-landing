@@ -16,7 +16,7 @@ export default function DashboardPage() {
           <h2 className="text-2xl font-bold tracking-tight">Dashboard</h2>
           <p className="text-muted-foreground">Overview of your account and recent activity.</p>
         </div>
-        <Link href="/settle">
+        <Link href="/dashboard/settle">
           <Button>
             New Settlement <ArrowRight className="ml-2 h-4 w-4" />
           </Button>

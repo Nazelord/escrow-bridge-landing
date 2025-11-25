@@ -3,27 +3,23 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Plus, Send } from "lucide-react";
-import { useConnection, useReadContract } from "wagmi";
-import { formatUnits } from "viem";
-import { baseSepolia } from "wagmi/chains";
-import { USDC_ADDRESS, ERC20_ABI } from "@/lib/constants";
+import { useConnection, useBalance } from "wagmi";
+import { formatEther } from "viem";
+import { blockdag } from "@/lib/config";
 
 export function BalanceCard() {
   const { address } = useConnection();
 
-  // Get USDC Balance directly from USDC token on Base Sepolia
-  const { data: balanceRaw } = useReadContract({
-    address: USDC_ADDRESS as `0x${string}`,
-    abi: ERC20_ABI,
-    functionName: 'balanceOf',
-    args: address ? [address as `0x${string}`] : undefined,
-    chainId: baseSepolia.id,
+  // Get BDAG Balance (native token) from BlockDAG network
+  const { data: balanceData } = useBalance({
+    address: address as `0x${string}`,
+    chainId: blockdag.id,
     query: {
       enabled: !!address,
     }
   });
 
-  const balance = balanceRaw ? formatUnits(balanceRaw as bigint, 6) : null;
+  const balance = balanceData ? formatEther(balanceData.value) : null;
 
   return (
     <Card className="bg-gradient-to-br from-zinc-900 to-zinc-800 text-white border-none shadow-xl overflow-hidden relative">
@@ -38,9 +34,9 @@ export function BalanceCard() {
       <CardContent className="px-6 pb-6">
         <div className="flex items-baseline gap-2 mb-8">
           <span className="text-5xl font-bold tracking-tight">
-            {balance ? `$${balance}` : "$0.00"}
+            {balance || "0.00"}
           </span>
-          <span className="text-xl text-zinc-500 font-normal">USDC</span>
+          <span className="text-xl text-zinc-500 font-normal">BDAG</span>
         </div>
         <div className="grid grid-cols-2 gap-4">
           <Button className="bg-white text-black hover:bg-zinc-200 h-12 text-base font-medium transition-transform active:scale-95" size="lg">
