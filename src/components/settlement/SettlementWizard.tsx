@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardContent } from "@/components/ui/card";
 import { Check } from "lucide-react";
 import { useConnection, useWriteContract, useWaitForTransactionReceipt, useReadContract, useSwitchChain } from "wagmi";
-import { parseUnits, keccak256, encodePacked, toHex } from "viem";
+import { parseUnits, keccak256, encodePacked, toHex, type Abi } from "viem";
 import { blockdag } from "@/lib/config";
 import { BRIDGE_ADDRESS, CHAINSETTLE_API, ESCROW_BRIDGE_API, ESCROW_BRIDGE_ABI, BDAG_ADDRESS, ERC20_ABI } from "@/lib/constants";
 
@@ -33,13 +33,13 @@ export function SettlementWizard() {
 
   const { data: recipientEmail } = useReadContract({
     address: BRIDGE_ADDRESS as `0x${string}`,
-    abi: ESCROW_BRIDGE_ABI,
+    abi: ESCROW_BRIDGE_ABI as unknown as Abi,
     functionName: 'recipientEmail',
   });
 
   const { data: allowance, refetch: refetchAllowance } = useReadContract({
     address: BDAG_ADDRESS as `0x${string}`,
-    abi: ERC20_ABI,
+    abi: ERC20_ABI as unknown as Abi,
     functionName: 'allowance',
     args: [address, BRIDGE_ADDRESS],
     chainId: blockdag.id,
@@ -47,7 +47,7 @@ export function SettlementWizard() {
 
   const { data: bdagBalance } = useReadContract({
     address: BDAG_ADDRESS as `0x${string}`,
-    abi: ERC20_ABI,
+    abi: ERC20_ABI as unknown as Abi,
     functionName: 'balanceOf',
     args: [address],
     chainId: blockdag.id,
@@ -86,7 +86,7 @@ export function SettlementWizard() {
         
         writeContract({
           address: BDAG_ADDRESS as `0x${string}`,
-          abi: ERC20_ABI,
+          abi: ERC20_ABI as unknown as Abi,
           functionName: 'approve',
           args: [BRIDGE_ADDRESS, rawAmount],
           chainId: blockdag.id,
@@ -132,7 +132,7 @@ export function SettlementWizard() {
       setNeedsApproval(false);
       writeContract({
         address: BRIDGE_ADDRESS as `0x${string}`,
-        abi: ESCROW_BRIDGE_ABI,
+        abi: ESCROW_BRIDGE_ABI as unknown as Abi,
         functionName: 'initPayment',
         args: [idHash, rawAmount],
         chainId: blockdag.id,
