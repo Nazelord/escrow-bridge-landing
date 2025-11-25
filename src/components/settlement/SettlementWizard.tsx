@@ -81,15 +81,16 @@ export function SettlementWizard() {
       const idHash = keccak256(encodePacked(["bytes32", "string"], [salt, settlementId]));
 
       // Init Payment with native BDAG FIRST (most important - the on-chain transaction)
-      setStatus("Confirm transaction in wallet...");
+      setStatus("Please confirm transaction in MetaMask...");
       console.log('Initiating payment:', {
         idHash,
         rawAmount: rawAmount.toString(),
         address: BRIDGE_ADDRESS,
-        chainId: blockdag.id
+        chainId: blockdag.id,
+        value: rawAmount.toString()
       });
       
-      writeContract({
+      const txHash = await writeContract({
         address: BRIDGE_ADDRESS as `0x${string}`,
         abi: ESCROW_BRIDGE_ABI as unknown as Abi,
         functionName: 'initPayment',
@@ -97,6 +98,8 @@ export function SettlementWizard() {
         value: rawAmount, // Send BDAG as value since it's native token
         chainId: blockdag.id,
       });
+
+      console.log('Transaction submitted:', txHash);
 
       // Store Salt in API (optional - if this fails, on-chain tx is still done)
       // We do this after to not block the transaction
@@ -119,7 +122,7 @@ export function SettlementWizard() {
 
     } catch (err) {
       const error = err as Error;
-      console.error(error);
+      console.error('Transaction error:', error);
       setStatus(`Error: ${error.message}`);
     }
   };
