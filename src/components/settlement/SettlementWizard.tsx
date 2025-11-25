@@ -5,7 +5,7 @@ import { AnimatePresence } from "framer-motion";
 import { Card, CardContent } from "@/components/ui/card";
 import { Check } from "lucide-react";
 import { useConnection, useWriteContract, useWaitForTransactionReceipt, useReadContract, useSwitchChain, useBalance, usePublicClient } from "wagmi";
-import { parseUnits, formatUnits, keccak256, encodePacked, toHex, type Abi } from "viem";
+import { parseUnits, formatUnits, keccak256, encodePacked, toHex } from "viem";
 import { blockdag } from "@/lib/config";
 import { BRIDGE_ADDRESS, CHAINSETTLE_API, ESCROW_BRIDGE_ABI } from "@/lib/constants";
 
@@ -33,37 +33,37 @@ export function SettlementWizard() {
 
   const { data: recipientEmail } = useReadContract({
     address: BRIDGE_ADDRESS as `0x${string}`,
-    abi: ESCROW_BRIDGE_ABI as unknown as Abi,
+    abi: ESCROW_BRIDGE_ABI.abi,
     functionName: 'recipientEmail',
   });
 
   const { data: minPaymentAmount } = useReadContract({
     address: BRIDGE_ADDRESS as `0x${string}`,
-    abi: ESCROW_BRIDGE_ABI as unknown as Abi,
+    abi: ESCROW_BRIDGE_ABI.abi,
     functionName: 'minPaymentAmount',
   });
 
   const { data: maxPaymentAmount } = useReadContract({
     address: BRIDGE_ADDRESS as `0x${string}`,
-    abi: ESCROW_BRIDGE_ABI as unknown as Abi,
+    abi: ESCROW_BRIDGE_ABI.abi,
     functionName: 'maxPaymentAmount',
   });
 
   const { data: freeBalance } = useReadContract({
     address: BRIDGE_ADDRESS as `0x${string}`,
-    abi: ESCROW_BRIDGE_ABI as unknown as Abi,
+    abi: ESCROW_BRIDGE_ABI.abi,
     functionName: 'getFreeBalance',
   });
 
   const { data: fee } = useReadContract({
     address: BRIDGE_ADDRESS as `0x${string}`,
-    abi: ESCROW_BRIDGE_ABI as unknown as Abi,
+    abi: ESCROW_BRIDGE_ABI.abi,
     functionName: 'fee',
   });
 
   const { data: feeDenominator } = useReadContract({
     address: BRIDGE_ADDRESS as `0x${string}`,
-    abi: ESCROW_BRIDGE_ABI as unknown as Abi,
+    abi: ESCROW_BRIDGE_ABI.abi,
     functionName: 'FEE_DENOMINATOR',
   });
 
@@ -162,9 +162,9 @@ export function SettlementWizard() {
       
       await writeContract({
         address: BRIDGE_ADDRESS as `0x${string}`,
-        abi: ESCROW_BRIDGE_ABI as unknown as Abi,
+        abi: ESCROW_BRIDGE_ABI.abi,
         functionName: 'initPayment',
-        args: [idHash, rawAmount],
+        args: [idHash as `0x${string}`, rawAmount] as const,
         value: rawAmount, // Send BDAG as value since it's native token
         chainId: blockdag.id,
       });
@@ -243,9 +243,9 @@ export function SettlementWizard() {
         // Check if settlement is finalized on-chain
         const isFinalized = await publicClient.readContract({
           address: BRIDGE_ADDRESS as `0x${string}`,
-          abi: ESCROW_BRIDGE_ABI as unknown as Abi,
+          abi: ESCROW_BRIDGE_ABI.abi,
           functionName: 'isFinalized',
-          args: [idHash],
+          args: [idHash as `0x${string}`],
         }) as boolean;
 
         if (isFinalized) {
@@ -257,9 +257,9 @@ export function SettlementWizard() {
         // Check if escrow expired
         const isExpired = await publicClient.readContract({
           address: BRIDGE_ADDRESS as `0x${string}`,
-          abi: ESCROW_BRIDGE_ABI as unknown as Abi,
+          abi: ESCROW_BRIDGE_ABI.abi,
           functionName: 'isEscrowExpired',
-          args: [idHash],
+          args: [idHash as `0x${string}`],
         }) as boolean;
 
         if (isExpired) {
