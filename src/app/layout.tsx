@@ -7,7 +7,7 @@ import { Providers } from "@/components/providers";
 
 export const metadata: Metadata = {
   title: "Escrow Bridge",
-  description: "Escrow Bridge frontend",
+  description: "Escrow Bridge - Secure Cross-Chain Escrow Services",
 };
 
 export default async function RootLayout({

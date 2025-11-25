@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { useConnect } from "wagmi";
 import { Wallet, Globe } from "lucide-react";
 import { useEffect } from "react";
+import { useRouter } from 'next/navigation';
 
 
 interface WalletModalProps {
@@ -13,13 +14,23 @@ interface WalletModalProps {
 }
 
 export function WalletModal({ isOpen, onClose }: WalletModalProps) {
-
+  const router = useRouter();
 
   const { connectors, connect, isPending, error, reset } = useConnect({
     mutation: {
       onSuccess: (data) => {
         console.log('WalletModal - Connection successful:', data);
         // Close modal and navigate to dashboard from the client to avoid server-side redirect races
+        try {
+          onClose();
+        } catch (e) {
+          // ignore
+        }
+        try {
+          router.push('/dashboard');
+        } catch (e) {
+          console.warn('WalletModal - router.push failed', e);
+        }
       },
       onError: (err) => {
         console.error('WalletModal - Connection error:', err);

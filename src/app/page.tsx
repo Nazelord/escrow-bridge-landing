@@ -118,7 +118,7 @@ export default function LandingPage() {
       </main>
 
       <footer className="py-12 border-t text-center text-sm text-muted-foreground">
-        <p>© 2024 EscrowBridge. All rights reserved.</p>
+        <p>© 2025 EscrowBridge. All rights reserved.</p>
       </footer>
     </div>
   );
