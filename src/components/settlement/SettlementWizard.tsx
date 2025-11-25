@@ -1,13 +1,13 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { AnimatePresence } from "framer-motion";
 import { Card, CardContent } from "@/components/ui/card";
 import { Check } from "lucide-react";
-import { useConnection, useWriteContract, useWaitForTransactionReceipt, useReadContract, useSwitchChain } from "wagmi";
-import { parseUnits, keccak256, encodePacked, toHex, type Abi } from "viem";
+import { useConnection, useWriteContract, useWaitForTransactionReceipt, useReadContract, useSwitchChain, useBalance, usePublicClient } from "wagmi";
+import { parseUnits, formatUnits, keccak256, encodePacked, toHex, type Abi } from "viem";
 import { blockdag } from "@/lib/config";
-import { BRIDGE_ADDRESS, CHAINSETTLE_API, ESCROW_BRIDGE_API, ESCROW_BRIDGE_ABI } from "@/lib/constants";
+import { BRIDGE_ADDRESS, CHAINSETTLE_API, ESCROW_BRIDGE_ABI } from "@/lib/constants";
 
 // Steps
 import { StepAmount } from "./StepAmount";
@@ -24,6 +24,7 @@ export function SettlementWizard() {
     email: "",
   });
   const [status, setStatus] = useState<string | null>(null);
+  const [escrowId, setEscrowId] = useState<string | null>(null);
   
   const { writeContract, data: hash, error: writeError } = useWriteContract();
   const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({
@@ -35,6 +36,43 @@ export function SettlementWizard() {
     abi: ESCROW_BRIDGE_ABI as unknown as Abi,
     functionName: 'recipientEmail',
   });
+
+  const { data: minPaymentAmount } = useReadContract({
+    address: BRIDGE_ADDRESS as `0x${string}`,
+    abi: ESCROW_BRIDGE_ABI as unknown as Abi,
+    functionName: 'minPaymentAmount',
+  });
+
+  const { data: maxPaymentAmount } = useReadContract({
+    address: BRIDGE_ADDRESS as `0x${string}`,
+    abi: ESCROW_BRIDGE_ABI as unknown as Abi,
+    functionName: 'maxPaymentAmount',
+  });
+
+  const { data: freeBalance } = useReadContract({
+    address: BRIDGE_ADDRESS as `0x${string}`,
+    abi: ESCROW_BRIDGE_ABI as unknown as Abi,
+    functionName: 'getFreeBalance',
+  });
+
+  const { data: fee } = useReadContract({
+    address: BRIDGE_ADDRESS as `0x${string}`,
+    abi: ESCROW_BRIDGE_ABI as unknown as Abi,
+    functionName: 'fee',
+  });
+
+  const { data: feeDenominator } = useReadContract({
+    address: BRIDGE_ADDRESS as `0x${string}`,
+    abi: ESCROW_BRIDGE_ABI as unknown as Abi,
+    functionName: 'FEE_DENOMINATOR',
+  });
+
+  const { data: userBalance } = useBalance({
+    address: address,
+    chainId: blockdag.id,
+  });
+
+  const publicClient = usePublicClient({ chainId: blockdag.id });
 
   const nextStep = () => setStep((s) => s + 1);
   const prevStep = () => setStep((s) => s - 1);
@@ -55,11 +93,36 @@ export function SettlementWizard() {
     }
 
     setStep(4); // Go to processing step
-    setStatus("Preparing transaction...");
+    setStatus("Validating amount...");
 
     try {
       const decimals = 18; // BDAG has 18 decimals like ETH
       const rawAmount = parseUnits(data.amount, decimals);
+
+      // Validate amount limits
+      if (minPaymentAmount && typeof minPaymentAmount === 'bigint' && rawAmount < minPaymentAmount) {
+        const minHuman = formatUnits(minPaymentAmount, decimals);
+        throw new Error(`Amount too low. Minimum: ${minHuman} BDAG`);
+      }
+
+      if (maxPaymentAmount && typeof maxPaymentAmount === 'bigint' && rawAmount > maxPaymentAmount) {
+        const maxHuman = formatUnits(maxPaymentAmount, decimals);
+        throw new Error(`Amount too high. Maximum: ${maxHuman} BDAG`);
+      }
+
+      // Validate bridge has sufficient free balance
+      if (freeBalance && typeof freeBalance === 'bigint' && rawAmount > freeBalance) {
+        const freeHuman = formatUnits(freeBalance, decimals);
+        throw new Error(`Insufficient bridge balance. Available: ${freeHuman} BDAG`);
+      }
+
+      // Validate user has enough BDAG for transaction + gas
+      if (userBalance && rawAmount > userBalance.value) {
+        const balanceHuman = formatUnits(userBalance.value, decimals);
+        throw new Error(`Insufficient BDAG balance. You have: ${balanceHuman} BDAG`);
+      }
+
+      setStatus("Preparing transaction...");
 
       // BDAG is native token, no approval needed - proceed directly with payment
       await initiatePayment(rawAmount);
@@ -76,9 +139,15 @@ export function SettlementWizard() {
 
     try {
       const salt = toHex(crypto.getRandomValues(new Uint8Array(32)));
-      const settlementId = `${address}-${Date.now()}`;
+      // Generate settlement_id like Python CLI (36 hex characters)
+      const settlementId = Array.from(crypto.getRandomValues(new Uint8Array(18)))
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join('');
       
       const idHash = keccak256(encodePacked(["bytes32", "string"], [salt, settlementId]));
+
+      // Store escrowId for polling
+      setEscrowId(idHash);
 
       // Init Payment with native BDAG FIRST (most important - the on-chain transaction)
       setStatus("Please confirm transaction in MetaMask...");
@@ -87,10 +156,11 @@ export function SettlementWizard() {
         rawAmount: rawAmount.toString(),
         address: BRIDGE_ADDRESS,
         chainId: blockdag.id,
-        value: rawAmount.toString()
+        value: rawAmount.toString(),
+        settlementId
       });
       
-      const txHash = await writeContract({
+      await writeContract({
         address: BRIDGE_ADDRESS as `0x${string}`,
         abi: ESCROW_BRIDGE_ABI as unknown as Abi,
         functionName: 'initPayment',
@@ -99,24 +169,37 @@ export function SettlementWizard() {
         chainId: blockdag.id,
       });
 
-      console.log('Transaction submitted:', txHash);
-
-      // Store Salt in API (optional - if this fails, on-chain tx is still done)
+      // Register settlement in API (after transaction is submitted)
       // We do this after to not block the transaction
       try {
-        await fetch(`${CHAINSETTLE_API}/api/store_salt`, {
+        setStatus("Registering settlement...");
+        const response = await fetch(`${CHAINSETTLE_API}/settlement/register_settlement`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            id_hash: idHash,
             salt,
-            email: data.email,
+            settlement_id: settlementId,
             recipient_email: recipientEmail,
           }),
         });
-        console.log("Salt stored successfully in API");
+        
+        if (!response.ok) {
+          throw new Error(`API registration failed: ${response.statusText}`);
+        }
+
+        const result = await response.json();
+        console.log("Settlement registered:", result);
+
+        // Open user_url for PayPal payment
+        if (result.settlement_info?.user_url) {
+          setStatus("Opening PayPal payment page...");
+          window.open(result.settlement_info.user_url, '_blank');
+        } else {
+          console.warn("No user_url in response");
+        }
       } catch (apiError) {
-        console.warn("API storage failed, but on-chain transaction was submitted:", apiError);
+        console.error("API registration failed:", apiError);
+        setStatus(`Warning: ${apiError instanceof Error ? apiError.message : 'API registration failed'}`);
         // Don't throw - the important part (on-chain tx) is already done
       }
 
@@ -135,13 +218,72 @@ export function SettlementWizard() {
   }, [isConfirming, status, hash]);
 
   useEffect(() => {
-    if (isConfirmed) {
+    if (isConfirmed && escrowId) {
       console.log('Transaction confirmed! Hash:', hash);
       setStatus("Transaction confirmed! Waiting for settlement...");
-      // Poll logic would go here, simplified for now
-      setTimeout(() => setStatus("Settlement Completed!"), 2000);
+      // Start polling for settlement status
+      pollSettlementStatus(escrowId);
     }
-  }, [isConfirmed, hash]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isConfirmed, hash, escrowId]);
+
+  const pollSettlementStatus = async (idHash: string) => {
+    if (!publicClient) {
+      console.error('Public client not available');
+      return;
+    }
+
+    const maxAttempts = 60; // Poll for 5 minutes (60 * 5s)
+    let attempts = 0;
+
+    const poll = async () => {
+      try {
+        attempts++;
+        
+        // Check if settlement is finalized on-chain
+        const isFinalized = await publicClient.readContract({
+          address: BRIDGE_ADDRESS as `0x${string}`,
+          abi: ESCROW_BRIDGE_ABI as unknown as Abi,
+          functionName: 'isFinalized',
+          args: [idHash],
+        }) as boolean;
+
+        if (isFinalized) {
+          setStatus("Settlement Completed! ✅");
+          console.log('Settlement finalized!');
+          return;
+        }
+
+        // Check if escrow expired
+        const isExpired = await publicClient.readContract({
+          address: BRIDGE_ADDRESS as `0x${string}`,
+          abi: ESCROW_BRIDGE_ABI as unknown as Abi,
+          functionName: 'isEscrowExpired',
+          args: [idHash],
+        }) as boolean;
+
+        if (isExpired) {
+          setStatus("Escrow expired. Please try again.");
+          console.log('Escrow expired');
+          return;
+        }
+
+        if (attempts < maxAttempts) {
+          setStatus(`Waiting for PayPal payment... (${attempts}/${maxAttempts})`);
+          setTimeout(poll, 5000); // Poll every 5 seconds
+        } else {
+          setStatus("Timeout waiting for settlement. Check status manually.");
+        }
+      } catch (error) {
+        console.error('Polling error:', error);
+        if (attempts < maxAttempts) {
+          setTimeout(poll, 5000);
+        }
+      }
+    };
+
+    poll();
+  };
 
   useEffect(() => {
     if (writeError) {
@@ -193,6 +335,9 @@ export function SettlementWizard() {
                 data={data} 
                 onConfirm={handleSettlement}
                 onBack={prevStep}
+                fee={fee && feeDenominator && typeof fee === 'bigint' && typeof feeDenominator === 'bigint' ? Number(fee) / Number(feeDenominator) : 0}
+                freeBalance={freeBalance && typeof freeBalance === 'bigint' ? formatUnits(freeBalance, 18) : undefined}
+                recipientEmail={recipientEmail as string | undefined}
               />
             )}
             {step === 4 && (
