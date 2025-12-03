@@ -8,7 +8,7 @@ const transactions = [
     id: 1,
     type: "sent",
     amount: "500.00",
-    currency: "BDAG",
+    currency: "USDC",
     status: "completed",
     date: "Today, 10:23 AM",
     recipient: "alice@example.com",
@@ -17,7 +17,7 @@ const transactions = [
     id: 2,
     type: "received",
     amount: "1,200.00",
-    currency: "BDAG",
+    currency: "USDC",
     status: "completed",
     date: "Yesterday, 4:15 PM",
     sender: "bob@example.com",
@@ -26,12 +26,19 @@ const transactions = [
     id: 3,
     type: "sent",
     amount: "50.00",
-    currency: "BDAG",
+    currency: "USDC",
     status: "pending",
     date: "Yesterday, 2:30 PM",
     recipient: "charlie@example.com",
   },
 ];
+
+// ===== COMMENTED OUT: BDAG currency (kept for possible future dual-chain setup) =====
+// const transactions = [
+//   { ..., currency: "BDAG", ... },
+//   ...
+// ];
+// =========================================================================================
 
 export function TransactionList() {
   return (

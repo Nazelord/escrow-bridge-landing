@@ -2,10 +2,10 @@
 
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, ShieldCheck } from "lucide-react";
+import { ArrowLeft, ShieldCheck, Wallet } from "lucide-react";
 
 interface StepReviewProps {
-  data: { amount: string; email: string };
+  data: { amount: string; walletAddress: string };
   onConfirm: () => void;
   onBack: () => void;
   fee?: number;
@@ -18,6 +18,7 @@ export function StepReview({ data, onConfirm, onBack, fee = 0, freeBalance, reci
   const amountNum = parseFloat(data.amount);
   const feeAmount = amountNum * fee;
   const totalAmount = amountNum + feeAmount;
+  
   return (
     <motion.div
       initial={{ opacity: 0, x: 20 }}
@@ -33,11 +34,14 @@ export function StepReview({ data, onConfirm, onBack, fee = 0, freeBalance, reci
       <div className="bg-muted/50 p-6 rounded-xl space-y-4">
         <div className="flex justify-between items-center border-b pb-4">
           <span className="text-muted-foreground">Amount</span>
-          <span className="text-xl font-bold">{data.amount} BDAG</span>
+          <span className="text-xl font-bold">{data.amount} USDC</span>
         </div>
-        <div className="flex justify-between items-center border-b pb-4">
-          <span className="text-muted-foreground">Email</span>
-          <span className="font-medium">{data.email}</span>
+        <div className="flex justify-between items-start border-b pb-4">
+          <span className="text-muted-foreground flex items-center gap-2">
+            <Wallet className="h-4 w-4" />
+            Recipient
+          </span>
+          <span className="font-mono text-sm text-right break-all max-w-[200px]">{data.walletAddress}</span>
         </div>
         {recipientEmail && (
           <div className="flex justify-between items-center border-b pb-4">
@@ -46,19 +50,19 @@ export function StepReview({ data, onConfirm, onBack, fee = 0, freeBalance, reci
           </div>
         )}
         <div className="flex justify-between items-center border-b pb-4">
-          <span className="text-muted-foreground">Fee</span>
-          <span className="font-medium">{feePercent}% {feeAmount > 0 && `(${feeAmount.toFixed(6)} BDAG)`}</span>
+          <span className="text-muted-foreground">Fee ({feePercent}%)</span>
+          <span className="font-medium">{feeAmount > 0 ? `${feeAmount.toFixed(6)} USDC` : 'Free'}</span>
         </div>
-        {totalAmount > amountNum && (
+        {feeAmount > 0 && (
           <div className="flex justify-between items-center border-b pb-4">
             <span className="text-muted-foreground font-semibold">Total</span>
-            <span className="text-xl font-bold">{totalAmount.toFixed(6)} BDAG</span>
+            <span className="text-xl font-bold">{totalAmount.toFixed(6)} USDC</span>
           </div>
         )}
         {freeBalance && (
           <div className="flex justify-between items-center text-sm">
             <span className="text-muted-foreground">Bridge Balance Available</span>
-            <span className="font-medium text-green-600">{parseFloat(freeBalance).toFixed(2)} BDAG</span>
+            <span className="font-medium text-green-600">{parseFloat(freeBalance).toFixed(2)} USDC</span>
           </div>
         )}
       </div>
