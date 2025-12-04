@@ -1,11 +1,11 @@
-"use client";
+
 
 import { useState, useEffect } from "react";
 import { AnimatePresence } from "framer-motion";
 import { Card, CardContent } from "@/components/ui/card";
 import { Check } from "lucide-react";
 import { useConnection, useWriteContract, useWaitForTransactionReceipt, useReadContract, useSwitchChain, usePublicClient } from "wagmi";
-import { parseUnits, formatUnits, keccak256, encodePacked, toHex } from "viem";
+import { parseUnits, formatUnits, keccak256, encodePacked, toBytes, toHex } from "viem";
 import { baseSepolia } from "@/lib/config";
 import { BRIDGE_ADDRESS, ESCROW_BRIDGE_ABI, USDC_ADDRESS, USDC_DECIMALS, ERC20_ABI } from "@/lib/constants";
 
@@ -28,6 +28,8 @@ export function SettlementWizard() {
   const [escrowId, setEscrowId] = useState<string | null>(null);
   const [pendingAmount, setPendingAmount] = useState<bigint | null>(null); // Track amount for payment after approval
   const [apiFee, setApiFee] = useState<number>(0); // Fee from API
+  const [pendingSalt, setPendingSalt] = useState<string | null>(null); // Salt for API registration after tx confirmation
+  const [pendingSettlementId, setPendingSettlementId] = useState<string | null>(null); // Settlement ID for API registration
   
   const { writeContract, data: hash, error: writeError } = useWriteContract();
   const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({
@@ -228,28 +230,35 @@ export function SettlementWizard() {
     if (!address) return;
 
     try {
-      const salt = toHex(crypto.getRandomValues(new Uint8Array(32)));
-      // Generate settlement_id like Python CLI (36 hex characters)
+      // Step 1: Generate salt and settlement_id (like Python CLI)
+      const saltBytes = crypto.getRandomValues(new Uint8Array(32));
+      const saltHex = toHex(saltBytes); // 0x... format for API and contract
+      
+      // Generate settlement_id like Python CLI (36 hex characters, no 0x prefix)
       const settlementId = Array.from(crypto.getRandomValues(new Uint8Array(18)))
         .map(b => b.toString(16).padStart(2, '0'))
         .join('');
       
-      const idHash = keccak256(encodePacked(["bytes32", "string"], [salt, settlementId]));
+      // Step 2: Generate idHash (escrow_id) for on-chain call
+      // Python: w3.solidity_keccak(["bytes32", "string"], [salt_bytes, settlement_id])
+      const idHash = keccak256(encodePacked(["bytes32", "string"], [saltHex as `0x${string}`, settlementId]));
 
-      // Store escrowId for polling
-      setEscrowId(idHash);
-
-      // Init Payment with USDC (ERC20 token - no value sent, token transferred via contract)
-      setStatus("Please confirm transaction in MetaMask...");
-      console.log('Initiating payment:', {
-        idHash,
-        rawAmount: rawAmount.toString(),
-        address: BRIDGE_ADDRESS,
-        chainId: baseSepolia.id,
-        token: USDC_ADDRESS,
-        settlementId,
-        recipientWallet: data.walletAddress
+      console.log('Payment parameters:', {
+        salt: saltHex,
+        settlement_id: settlementId,
+        escrow_id: idHash,
+        amount: rawAmount.toString(),
+        recipient: data.walletAddress,
       });
+
+      // Store for later use (after tx confirmation)
+      setEscrowId(idHash);
+      setPendingSalt(saltHex);
+      setPendingSettlementId(settlementId);
+
+      // Step 3: Submit on-chain transaction (initPayment)
+      // Python: bridge.functions.initPayment(escrow_id_bytes, amount_raw, recipient)
+      setStatus("Please confirm transaction in MetaMask...");
       
       await writeContract({
         address: BRIDGE_ADDRESS as `0x${string}`,
@@ -260,61 +269,8 @@ export function SettlementWizard() {
         chainId: baseSepolia.id,
       });
 
-      // ===== COMMENTED OUT: BDAG native token logic (kept for possible future dual-chain setup) =====
-      // await writeContract({
-      //   address: BRIDGE_ADDRESS as `0x${string}`,
-      //   abi: ESCROW_BRIDGE_ABI.abi,
-      //   functionName: 'initPayment',
-      //   args: [idHash as `0x${string}`, rawAmount] as const,
-      //   value: rawAmount, // Send BDAG as value since it's native token
-      //   chainId: blockdag.id,
-      // });
-      // =========================================================================================
-
-      // Register settlement in API (after transaction is submitted)
-      // We do this after to not block the transaction
-      try {
-        setStatus("Registering settlement with ChainSettle...");
-        
-        // Get recipient_email from contract (like Python CLI does)
-        const contractRecipientEmail = recipientEmail || "treasury@lp.com";
-        
-        const registrationPayload = {
-          salt: salt,
-          settlement_id: settlementId,
-          recipient_email: contractRecipientEmail, // Use contract's recipient_email, not user's wallet
-        };
-        console.log('Registering settlement with payload:', registrationPayload);
-        
-        const response = await fetch(`/api/register-settlement`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(registrationPayload),
-        });
-        
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-          console.error('API registration failed:', response.status, errorData);
-          throw new Error(`API registration failed: ${response.statusText} - ${JSON.stringify(errorData)}`);
-        }
-
-        const result = await response.json();
-        console.log("Settlement registered:", result);
-
-        // Open user_url for PayPal payment
-        if (result.settlement_info?.user_url) {
-          setStatus("Opening PayPal payment page...");
-          window.open(result.settlement_info.user_url, '_blank');
-        } else {
-          console.warn("No user_url in response");
-          setStatus("Transaction confirmed! Settlement registered successfully.");
-        }
-      } catch (apiError) {
-        console.error("API registration failed (CORS or network issue):", apiError);
-        // Don't show error to user since the on-chain transaction succeeded
-        setStatus("Transaction confirmed! Waiting for settlement...");
-        // Don't throw - the important part (on-chain tx) is already done
-      }
+      // Note: API registration happens AFTER transaction is confirmed (in useEffect)
+      // This matches Python CLI flow: initPayment → wait for receipt → register_settlement
 
     } catch (err) {
       const error = err as Error;
@@ -338,14 +294,75 @@ export function SettlementWizard() {
       const amountToProcess = pendingAmount; // Save amount before clearing
       setPendingAmount(null); // Clear pending amount
       initiatePayment(amountToProcess); // Use saved amount
-    } else if (isConfirmed && escrowId) {
-      // Payment confirmed - start polling
+    } else if (isConfirmed && escrowId && pendingSalt && pendingSettlementId) {
+      // Payment confirmed - NOW register with API (like Python CLI)
       console.log('Transaction confirmed! Hash:', hash);
-      setStatus("Transaction confirmed! Waiting for settlement...");
-      pollSettlementStatus(escrowId);
+      setStatus("Transaction confirmed! Registering with ChainSettle...");
+      
+      // Register settlement with API (off-chain)
+      registerSettlement(pendingSalt, pendingSettlementId, escrowId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isConfirmed, hash, escrowId, pendingAmount]);
+  }, [isConfirmed, hash, escrowId, pendingAmount, pendingSalt, pendingSettlementId]);
+
+  const registerSettlement = async (saltHex: string, settlementId: string, escrowId: string) => {
+    try {
+      // Get recipient_email from contract (like Python CLI does)
+      const contractRecipientEmail = recipientEmail || "treasury@lp.com";
+      
+      const registrationPayload = {
+        salt: saltHex, // hex format with 0x prefix
+        settlement_id: settlementId, // 36 hex chars, no 0x prefix
+        recipient_email: contractRecipientEmail, // from contract, not user wallet
+      };
+      
+      console.log('Registering settlement with ChainSettle API:', registrationPayload);
+      
+      // Use our Next.js API route as proxy to avoid CORS issues
+      const response = await fetch(`/api/register_settlement`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(registrationPayload),
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        console.error('API registration failed:', response.status, errorData);
+        throw new Error(`API registration failed: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      console.log("Settlement registered successfully:", result);
+
+      // Clear pending values
+      setPendingSalt(null);
+      setPendingSettlementId(null);
+
+      // Open user_url for PayPal payment
+      if (result.settlement_info?.user_url) {
+        setStatus("Opening PayPal payment page...");
+        window.open(result.settlement_info.user_url, '_blank');
+        
+        // Start polling after opening PayPal
+        setTimeout(() => {
+          setStatus("Waiting for PayPal payment...");
+          pollSettlementStatus(escrowId);
+        }, 1000);
+      } else {
+        console.warn("No user_url in response");
+        setStatus("Settlement registered! Waiting for completion...");
+        pollSettlementStatus(escrowId);
+      }
+    } catch (apiError) {
+      console.error("API registration failed:", apiError);
+      // Clear pending values even on error
+      setPendingSalt(null);
+      setPendingSettlementId(null);
+      // Still try to poll in case the on-chain part worked
+      setStatus("Warning: API registration failed, but monitoring settlement...");
+      pollSettlementStatus(escrowId);
+    }
+  };
 
   const pollSettlementStatus = async (idHash: string) => {
     if (!publicClient) {

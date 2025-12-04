@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 const CHAINSETTLE_API = process.env.NEXT_PUBLIC_CHAINSETTLE_API || "https://api.chainsettle.tech";
 
 export async function POST(request: NextRequest) {
-  console.log('API Route called: /api/register-settlement');
+  console.log('API Route called: /api/register_settlement');
   try {
     const body = await request.json();
     console.log('Received body:', body);
