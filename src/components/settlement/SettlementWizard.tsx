@@ -1,19 +1,20 @@
-"use client";
+
 
 import { useState, useEffect } from "react";
 import { AnimatePresence } from "framer-motion";
 import { Card, CardContent } from "@/components/ui/card";
 import { Check } from "lucide-react";
-import { useConnection, useWriteContract, useWaitForTransactionReceipt, useReadContract, useSwitchChain, useBalance, usePublicClient } from "wagmi";
-import { parseUnits, formatUnits, keccak256, encodePacked, toHex } from "viem";
-import { blockdag } from "@/lib/config";
-import { BRIDGE_ADDRESS, ESCROW_BRIDGE_ABI } from "@/lib/constants";
+import { useConnection, useWriteContract, useWaitForTransactionReceipt, useReadContract, useSwitchChain, usePublicClient } from "wagmi";
+import { parseUnits, formatUnits, keccak256, encodePacked, toBytes, toHex } from "viem";
+import { baseSepolia } from "@/lib/config";
+import { BRIDGE_ADDRESS, ESCROW_BRIDGE_ABI, USDC_ADDRESS, USDC_DECIMALS, ERC20_ABI } from "@/lib/constants";
 
 // Steps
 import { StepAmount } from "./StepAmount";
 import { StepRecipient } from "./StepRecipient";
 import { StepReview } from "./StepReview";
 import { StepProcessing } from "./StepProcessing";
+import { stringToBytes } from "viem";
 
 export function SettlementWizard() {
   const { address, chainId } = useConnection();
@@ -21,10 +22,14 @@ export function SettlementWizard() {
   const [step, setStep] = useState(1);
   const [data, setData] = useState({
     amount: "",
-    email: "",
+    walletAddress: "",
   });
   const [status, setStatus] = useState<string | null>(null);
   const [escrowId, setEscrowId] = useState<string | null>(null);
+  const [pendingAmount, setPendingAmount] = useState<bigint | null>(null); // Track amount for payment after approval
+  const [apiFee, setApiFee] = useState<number>(0); // Fee from API
+  const [pendingSalt, setPendingSalt] = useState<string | null>(null); // Salt for API registration after tx confirmation
+  const [pendingSettlementId, setPendingSettlementId] = useState<string | null>(null); // Settlement ID for API registration
   
   const { writeContract, data: hash, error: writeError } = useWriteContract();
   const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({
@@ -33,46 +38,92 @@ export function SettlementWizard() {
 
   const { data: recipientEmail } = useReadContract({
     address: BRIDGE_ADDRESS as `0x${string}`,
-    abi: ESCROW_BRIDGE_ABI.abi,
+    abi: ESCROW_BRIDGE_ABI,
     functionName: 'recipientEmail',
   });
 
   const { data: minPaymentAmount } = useReadContract({
     address: BRIDGE_ADDRESS as `0x${string}`,
-    abi: ESCROW_BRIDGE_ABI.abi,
+    abi: ESCROW_BRIDGE_ABI,
     functionName: 'minPaymentAmount',
   });
 
   const { data: maxPaymentAmount } = useReadContract({
     address: BRIDGE_ADDRESS as `0x${string}`,
-    abi: ESCROW_BRIDGE_ABI.abi,
+    abi: ESCROW_BRIDGE_ABI,
     functionName: 'maxPaymentAmount',
   });
 
   const { data: freeBalance } = useReadContract({
     address: BRIDGE_ADDRESS as `0x${string}`,
-    abi: ESCROW_BRIDGE_ABI.abi,
+    abi: ESCROW_BRIDGE_ABI,
     functionName: 'getFreeBalance',
   });
 
-  const { data: fee } = useReadContract({
-    address: BRIDGE_ADDRESS as `0x${string}`,
-    abi: ESCROW_BRIDGE_ABI.abi,
-    functionName: 'fee',
+  // Fetch fee from API
+  useEffect(() => {
+    const fetchFee = async () => {
+      try {
+        const response = await fetch('https://app.escrowbridge.xyz/fee');
+        if (response.ok) {
+          const feeData = await response.json();
+          console.log('Fee API response:', feeData);
+          
+          // API returns { fee_pct: "1.00%" } - parse the percentage string
+          if (feeData.fee_pct) {
+            // Remove % sign and convert to decimal (e.g., "1.00%" -> 0.01)
+            const feeString = feeData.fee_pct.replace('%', '');
+            const feeValue = parseFloat(feeString) / 100;
+            setApiFee(feeValue);
+            console.log('Fee loaded from API:', feeValue, `(${feeData.fee_pct})`);
+          } else {
+            console.warn('No fee_pct in response, using default 0');
+          }
+        } else {
+          console.warn('Failed to fetch fee, using default 0');
+        }
+      } catch (error) {
+        console.error('Error fetching fee:', error);
+        // Keep default fee of 0
+      }
+    };
+    fetchFee();
+  }, []);
+
+  // ===== COMMENTED OUT: Fee from contract (now using API) =====
+  // const { data: fee } = useReadContract({
+  //   address: BRIDGE_ADDRESS as `0x${string}`,
+  //   abi: ESCROW_BRIDGE_ABI.abi,
+  //   functionName: 'fee',
+  // });
+  //
+  // const { data: feeDenominator } = useReadContract({
+  //   address: BRIDGE_ADDRESS as `0x${string}`,
+  //   abi: ESCROW_BRIDGE_ABI.abi,
+  //   functionName: 'FEE_DENOMINATOR',
+  // });
+  // =================================================================
+
+  // Get user's USDC balance (ERC20 token)
+  const { data: userBalance } = useReadContract({
+    address: USDC_ADDRESS as `0x${string}`,
+    abi: ERC20_ABI as any,
+    functionName: 'balanceOf',
+    args: [address as `0x${string}`],
+    chainId: baseSepolia.id,
+    query: {
+      enabled: !!address && !!USDC_ADDRESS,
+    }
   });
 
-  const { data: feeDenominator } = useReadContract({
-    address: BRIDGE_ADDRESS as `0x${string}`,
-    abi: ESCROW_BRIDGE_ABI.abi,
-    functionName: 'FEE_DENOMINATOR',
-  });
+  // ===== COMMENTED OUT: Native BDAG balance (kept for possible future dual-chain setup) =====
+  // const { data: userBalance } = useBalance({
+  //   address: address,
+  //   chainId: blockdag.id,
+  // });
+  // =========================================================================================
 
-  const { data: userBalance } = useBalance({
-    address: address,
-    chainId: blockdag.id,
-  });
-
-  const publicClient = usePublicClient({ chainId: blockdag.id });
+  const publicClient = usePublicClient({ chainId: baseSepolia.id });
 
   const nextStep = () => setStep((s) => s + 1);
   const prevStep = () => setStep((s) => s - 1);
@@ -80,11 +131,11 @@ export function SettlementWizard() {
   const handleSettlement = async () => {
     if (!address) return;
 
-    // Check if we're on BlockDAG network
-    if (chainId !== blockdag.id) {
-      setStatus("Switching to BlockDAG Testnet...");
+    // Check if we're on Base Sepolia network
+    if (chainId !== baseSepolia.id) {
+      setStatus("Switching to Base Sepolia Testnet...");
       try {
-        await switchChain({ chainId: blockdag.id });
+        await switchChain({ chainId: baseSepolia.id });
       } catch (err) {
         const error = err as Error;
         setStatus(`Error switching network: ${error.message}`);
@@ -96,36 +147,44 @@ export function SettlementWizard() {
     setStatus("Validating amount...");
 
     try {
-      const decimals = 18; // BDAG has 18 decimals like ETH
+      const decimals = USDC_DECIMALS; // USDC has 6 decimals
       const rawAmount = parseUnits(data.amount, decimals);
 
       // Validate amount limits
       if (minPaymentAmount && typeof minPaymentAmount === 'bigint' && rawAmount < minPaymentAmount) {
         const minHuman = formatUnits(minPaymentAmount, decimals);
-        throw new Error(`Amount too low. Minimum: ${minHuman} BDAG`);
+        throw new Error(`Amount too low. Minimum: ${minHuman} USDC`);
       }
 
       if (maxPaymentAmount && typeof maxPaymentAmount === 'bigint' && rawAmount > maxPaymentAmount) {
         const maxHuman = formatUnits(maxPaymentAmount, decimals);
-        throw new Error(`Amount too high. Maximum: ${maxHuman} BDAG`);
+        throw new Error(`Amount too high. Maximum: ${maxHuman} USDC`);
       }
 
       // Validate bridge has sufficient free balance
       if (freeBalance && typeof freeBalance === 'bigint' && rawAmount > freeBalance) {
         const freeHuman = formatUnits(freeBalance, decimals);
-        throw new Error(`Insufficient bridge balance. Available: ${freeHuman} BDAG`);
+        throw new Error(`Insufficient bridge balance. Available: ${freeHuman} USDC`);
       }
 
-      // Validate user has enough BDAG for transaction + gas
-      if (userBalance && rawAmount > userBalance.value) {
-        const balanceHuman = formatUnits(userBalance.value, decimals);
-        throw new Error(`Insufficient BDAG balance. You have: ${balanceHuman} BDAG`);
+      // Validate user has enough USDC for transaction
+      if (userBalance && typeof userBalance === 'bigint' && rawAmount > userBalance) {
+        const balanceHuman = formatUnits(userBalance, decimals);
+        throw new Error(`Insufficient USDC balance. You have: ${balanceHuman} USDC`);
       }
 
       setStatus("Preparing transaction...");
 
-      // BDAG is native token, no approval needed - proceed directly with payment
-      await initiatePayment(rawAmount);
+      // USDC is ERC20 token - need to approve bridge contract first
+      await approveAndInitiatePayment(rawAmount);
+
+      // ===== COMMENTED OUT: BDAG native token logic (kept for possible future dual-chain setup) =====
+      // const decimals = 18; // BDAG has 18 decimals like ETH
+      // const rawAmount = parseUnits(data.amount, decimals);
+      // // ... validation with BDAG references ...
+      // // BDAG is native token, no approval needed - proceed directly with payment
+      // await initiatePayment(rawAmount);
+      // =========================================================================================
 
     } catch (err) {
       const error = err as Error;
@@ -134,76 +193,84 @@ export function SettlementWizard() {
     }
   };
 
+  const approveAndInitiatePayment = async (rawAmount: bigint) => {
+    if (!address) return;
+
+    try {
+      // Store amount for next step (payment after approval)
+      setPendingAmount(rawAmount);
+      
+      // Step 1: Approve USDC spending by bridge contract
+      setStatus("Approving USDC spending...");
+      console.log('Approving USDC:', {
+        token: USDC_ADDRESS,
+        spender: BRIDGE_ADDRESS,
+        amount: rawAmount.toString(),
+      });
+
+      await writeContract({
+        address: USDC_ADDRESS as `0x${string}`,
+        abi: ERC20_ABI as any,
+        functionName: 'approve',
+        args: [BRIDGE_ADDRESS as `0x${string}`, rawAmount],
+        chainId: baseSepolia.id,
+      });
+
+      // After approval confirmation, initiatePayment will be called via useEffect
+      
+    } catch (err) {
+      const error = err as Error;
+      console.error('Approval error:', error);
+      setStatus(`Error approving USDC: ${error.message}`);
+      setPendingAmount(null);
+    }
+  };
+
   const initiatePayment = async (rawAmount: bigint) => {
     if (!address) return;
 
     try {
-      const salt = toHex(crypto.getRandomValues(new Uint8Array(32)));
-      // Generate settlement_id like Python CLI (36 hex characters)
+      // Step 1: Generate salt and settlement_id (like Python CLI)
+      const saltBytes = crypto.getRandomValues(new Uint8Array(32));
+      const saltHex = toHex(saltBytes); // 0x... format for API and contract
+      
+      // Generate settlement_id like Python CLI (36 hex characters, no 0x prefix)
       const settlementId = Array.from(crypto.getRandomValues(new Uint8Array(18)))
         .map(b => b.toString(16).padStart(2, '0'))
         .join('');
       
-      const idHash = keccak256(encodePacked(["bytes32", "string"], [salt, settlementId]));
+      // Step 2: Generate idHash (escrow_id) for on-chain call
+      // Python: w3.solidity_keccak(["bytes32", "string"], [salt_bytes, settlement_id])
+      const idHash = keccak256(encodePacked(["bytes32", "string"], [saltHex as `0x${string}`, settlementId]));
 
-      // Store escrowId for polling
-      setEscrowId(idHash);
-
-      // Init Payment with native BDAG FIRST (most important - the on-chain transaction)
-      setStatus("Please confirm transaction in MetaMask...");
-      console.log('Initiating payment:', {
-        idHash,
-        rawAmount: rawAmount.toString(),
-        address: BRIDGE_ADDRESS,
-        chainId: blockdag.id,
-        value: rawAmount.toString(),
-        settlementId
+      console.log('Payment parameters:', {
+        salt: saltHex,
+        settlement_id: settlementId,
+        escrow_id: idHash,
+        amount: rawAmount.toString(),
+        recipient: data.walletAddress,
       });
+
+      // Store for later use (after tx confirmation)
+      setEscrowId(idHash);
+      setPendingSalt(saltHex);
+      setPendingSettlementId(settlementId);
+
+      // Step 3: Submit on-chain transaction (initPayment)
+      // Python: bridge.functions.initPayment(escrow_id_bytes, amount_raw, recipient)
+      setStatus("Please confirm transaction in MetaMask...");
       
       await writeContract({
         address: BRIDGE_ADDRESS as `0x${string}`,
-        abi: ESCROW_BRIDGE_ABI.abi,
+        abi: ESCROW_BRIDGE_ABI,
         functionName: 'initPayment',
-        args: [idHash as `0x${string}`, rawAmount] as const,
-        value: rawAmount, // Send BDAG as value since it's native token
-        chainId: blockdag.id,
+        args: [idHash as `0x${string}`, rawAmount, data.walletAddress as `0x${string}`] as const,
+        // NOTE: No 'value' field for ERC20 tokens - approval handles the transfer
+        chainId: baseSepolia.id,
       });
 
-      // Register settlement in API (after transaction is submitted)
-      // We do this after to not block the transaction
-      try {
-        setStatus("Registering settlement with ChainSettle...");
-        const response = await fetch(`/api/register-settlement`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            salt,
-            settlement_id: settlementId,
-            recipient_email: recipientEmail,
-          }),
-        });
-        
-        if (!response.ok) {
-          throw new Error(`API registration failed: ${response.statusText}`);
-        }
-
-        const result = await response.json();
-        console.log("Settlement registered:", result);
-
-        // Open user_url for PayPal payment
-        if (result.settlement_info?.user_url) {
-          setStatus("Opening PayPal payment page...");
-          window.open(result.settlement_info.user_url, '_blank');
-        } else {
-          console.warn("No user_url in response");
-          setStatus("Transaction confirmed! Settlement registered successfully.");
-        }
-      } catch (apiError) {
-        console.error("API registration failed (CORS or network issue):", apiError);
-        // Don't show error to user since the on-chain transaction succeeded
-        setStatus("Transaction confirmed! Waiting for settlement...");
-        // Don't throw - the important part (on-chain tx) is already done
-      }
+      // Note: API registration happens AFTER transaction is confirmed (in useEffect)
+      // This matches Python CLI flow: initPayment → wait for receipt → register_settlement
 
     } catch (err) {
       const error = err as Error;
@@ -220,14 +287,82 @@ export function SettlementWizard() {
   }, [isConfirming, status, hash]);
 
   useEffect(() => {
-    if (isConfirmed && escrowId) {
+    if (isConfirmed && pendingAmount && !escrowId) {
+      // Approval confirmed - now initiate payment
+      console.log('Approval confirmed! Hash:', hash);
+      setStatus("Approval confirmed! Initiating payment...");
+      const amountToProcess = pendingAmount; // Save amount before clearing
+      setPendingAmount(null); // Clear pending amount
+      initiatePayment(amountToProcess); // Use saved amount
+    } else if (isConfirmed && escrowId && pendingSalt && pendingSettlementId) {
+      // Payment confirmed - NOW register with API (like Python CLI)
       console.log('Transaction confirmed! Hash:', hash);
-      setStatus("Transaction confirmed! Waiting for settlement...");
-      // Start polling for settlement status
-      pollSettlementStatus(escrowId);
+      setStatus("Transaction confirmed! Registering with ChainSettle...");
+      
+      // Register settlement with API (off-chain)
+      registerSettlement(pendingSalt, pendingSettlementId, escrowId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isConfirmed, hash, escrowId]);
+  }, [isConfirmed, hash, escrowId, pendingAmount, pendingSalt, pendingSettlementId]);
+
+  const registerSettlement = async (saltHex: string, settlementId: string, escrowId: string) => {
+    try {
+      // Get recipient_email from contract (like Python CLI does)
+      const contractRecipientEmail = recipientEmail || "treasury@lp.com";
+      
+      const registrationPayload = {
+        salt: saltHex, // hex format with 0x prefix
+        settlement_id: settlementId, // 36 hex chars, no 0x prefix
+        recipient_email: contractRecipientEmail, // from contract, not user wallet
+      };
+      
+      console.log('Registering settlement with ChainSettle API:', registrationPayload);
+      
+      // Use our Next.js API route as proxy to avoid CORS issues
+      const response = await fetch(`/api/register_settlement`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(registrationPayload),
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        console.error('API registration failed:', response.status, errorData);
+        throw new Error(`API registration failed: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      console.log("Settlement registered successfully:", result);
+
+      // Clear pending values
+      setPendingSalt(null);
+      setPendingSettlementId(null);
+
+      // Open user_url for PayPal payment
+      if (result.settlement_info?.user_url) {
+        setStatus("Opening PayPal payment page...");
+        window.open(result.settlement_info.user_url, '_blank');
+        
+        // Start polling after opening PayPal
+        setTimeout(() => {
+          setStatus("Waiting for PayPal payment...");
+          pollSettlementStatus(escrowId);
+        }, 1000);
+      } else {
+        console.warn("No user_url in response");
+        setStatus("Settlement registered! Waiting for completion...");
+        pollSettlementStatus(escrowId);
+      }
+    } catch (apiError) {
+      console.error("API registration failed:", apiError);
+      // Clear pending values even on error
+      setPendingSalt(null);
+      setPendingSettlementId(null);
+      // Still try to poll in case the on-chain part worked
+      setStatus("Warning: API registration failed, but monitoring settlement...");
+      pollSettlementStatus(escrowId);
+    }
+  };
 
   const pollSettlementStatus = async (idHash: string) => {
     if (!publicClient) {
@@ -242,11 +377,11 @@ export function SettlementWizard() {
       try {
         attempts++;
         
-        // Check if settlement is finalized on-chain
+        // Check if settlement is finalized on-chain (using isSettled instead of isFinalized)
         const isFinalized = await publicClient.readContract({
           address: BRIDGE_ADDRESS as `0x${string}`,
-          abi: ESCROW_BRIDGE_ABI.abi,
-          functionName: 'isFinalized',
+          abi: ESCROW_BRIDGE_ABI,
+          functionName: 'isSettled',
           args: [idHash as `0x${string}`],
         }) as boolean;
 
@@ -259,7 +394,7 @@ export function SettlementWizard() {
         // Check if escrow expired
         const isExpired = await publicClient.readContract({
           address: BRIDGE_ADDRESS as `0x${string}`,
-          abi: ESCROW_BRIDGE_ABI.abi,
+          abi: ESCROW_BRIDGE_ABI,
           functionName: 'isEscrowExpired',
           args: [idHash as `0x${string}`],
         }) as boolean;
@@ -325,8 +460,8 @@ export function SettlementWizard() {
             {step === 2 && (
               <StepRecipient 
                 key="step2" 
-                email={data.email} 
-                setEmail={(e: string) => setData({ ...data, email: e })} 
+                walletAddress={data.walletAddress} 
+                setWalletAddress={(w: string) => setData({ ...data, walletAddress: w })} 
                 onNext={nextStep}
                 onBack={prevStep}
               />
@@ -337,8 +472,8 @@ export function SettlementWizard() {
                 data={data} 
                 onConfirm={handleSettlement}
                 onBack={prevStep}
-                fee={fee && feeDenominator && typeof fee === 'bigint' && typeof feeDenominator === 'bigint' ? Number(fee) / Number(feeDenominator) : 0}
-                freeBalance={freeBalance && typeof freeBalance === 'bigint' ? formatUnits(freeBalance, 18) : undefined}
+                fee={apiFee}
+                freeBalance={freeBalance && typeof freeBalance === 'bigint' ? formatUnits(freeBalance, USDC_DECIMALS) : undefined}
                 recipientEmail={recipientEmail as string | undefined}
               />
             )}

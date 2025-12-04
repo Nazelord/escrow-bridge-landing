@@ -3,23 +3,38 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Plus, Send } from "lucide-react";
-import { useConnection, useBalance } from "wagmi";
-import { formatEther } from "viem";
-import { blockdag } from "@/lib/config";
+import { useConnection, useReadContract } from "wagmi";
+import { formatUnits } from "viem";
+import { baseSepolia } from "@/lib/config";
+import { USDC_ADDRESS, USDC_DECIMALS, ERC20_ABI } from "@/lib/constants";
 
 export function BalanceCard() {
   const { address } = useConnection();
 
-  // Get BDAG Balance (native token) from BlockDAG network
-  const { data: balanceData } = useBalance({
-    address: address as `0x${string}`,
-    chainId: blockdag.id,
+  // Get USDC Balance (ERC20 token) from Base Sepolia network
+  const { data: balanceData } = useReadContract({
+    address: USDC_ADDRESS as `0x${string}`,
+    abi: ERC20_ABI as any,
+    functionName: 'balanceOf',
+    args: [address as `0x${string}`],
+    chainId: baseSepolia.id,
     query: {
-      enabled: !!address,
+      enabled: !!address && !!USDC_ADDRESS,
     }
   });
 
-  const balance = balanceData ? formatEther(balanceData.value) : null;
+  const balance = balanceData ? formatUnits(balanceData as bigint, USDC_DECIMALS) : null;
+
+  // ===== COMMENTED OUT: BDAG native balance (kept for possible future dual-chain setup) =====
+  // const { data: balanceData } = useBalance({
+  //   address: address as `0x${string}`,
+  //   chainId: blockdag.id, // or baseSepolia.id for ETH
+  //   query: {
+  //     enabled: !!address,
+  //   }
+  // });
+  // const balance = balanceData ? formatEther(balanceData.value) : null;
+  // =========================================================================================
 
   return (
     <Card className="bg-gradient-to-br from-zinc-900 to-zinc-800 text-white border-none shadow-xl overflow-hidden relative">
@@ -36,7 +51,7 @@ export function BalanceCard() {
           <span className="text-5xl font-bold tracking-tight">
             {balance || "0.00"}
           </span>
-          <span className="text-xl text-zinc-500 font-normal">BDAG</span>
+          <span className="text-xl text-zinc-500 font-normal">USDC</span>
         </div>
         <div className="grid grid-cols-2 gap-4">
           <Button className="bg-white text-black hover:bg-zinc-200 h-12 text-base font-medium transition-transform active:scale-95" size="lg">
