@@ -64,7 +64,7 @@ export default function LandingPage() {
         <section className="py-24 md:py-32 px-6 md:px-12 flex flex-col items-center text-center max-w-5xl mx-auto space-y-8">
           <div className="inline-flex items-center rounded-full border px-3 py-1 text-sm font-medium bg-muted/50">
             <span className="flex h-2 w-2 rounded-full bg-green-500 mr-2"></span>
-            Now Live on Mainnet
+            Now Live on Testnet
           </div>
           <h1 className="text-5xl md:text-7xl font-bold tracking-tight bg-gradient-to-br from-foreground to-muted-foreground bg-clip-text text-transparent pb-2">
             The Future of <br /> Crypto Settlements
