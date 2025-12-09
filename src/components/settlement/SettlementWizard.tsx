@@ -167,11 +167,9 @@ export function SettlementWizard() {
         throw new Error(`Insufficient bridge balance. Available: ${freeHuman} USDC`);
       }
 
-      // Validate user has enough USDC for transaction
-      if (userBalance && typeof userBalance === 'bigint' && rawAmount > userBalance) {
-        const balanceHuman = formatUnits(userBalance, decimals);
-        throw new Error(`Insufficient USDC balance. You have: ${balanceHuman} USDC`);
-      }
+      // NOTE: User balance validation removed - users can request any amount
+      // They will complete PayPal payment to receive the USDC they requested
+      // The bridge will hold the escrow until PayPal payment is confirmed
 
       setStatus("Preparing transaction...");
 
